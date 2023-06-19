@@ -3,7 +3,7 @@
 #common parameters
 imu_topic: "/djiros/imu"
 image_topic: "/djiros/image"
-output_path: "/home/urop/output/"         # vins outputs will be wrttento vins_folder_path + output_path
+output_path: "/home/nros/output/"         # vins outputs will be wrttento vins_folder_path + output_path
 
 #camera calibration 
 model_type: MEI

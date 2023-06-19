@@ -3,7 +3,7 @@
 #common parameters
 imu_topic: "/camera/imu/data_raw"
 image_topic: "/camera/fisheye/image_raw"
-output_path: "/home/tony-ws1/output/"
+output_path: "/home/nros/output/"
 
 #camera calibration 
 model_type: KANNALA_BRANDT

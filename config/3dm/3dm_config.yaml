@@ -3,7 +3,7 @@
 #common parameters
 imu_topic: "/imu_3dm_gx4/imu"
 image_topic: "/mv_25001498/image_raw"
-output_path: "/home/tony-ws1/output/"
+output_path: "/home/nros/output/"
 
 # MEI is better than PINHOLE for large FOV camera
 model_type: MEI
