@@ -1,3 +1,5 @@
+> syz为完成HITSZ移动机器人导航理论课大作业进行的代码阅读和注释。
+> 本代码已经针对20.04STL完成了适配，想要跑数据集只需要按照网上教程改一下一个什么路径就行。
 # VINS-Mono
 ## A Robust and Versatile Monocular Visual-Inertial State Estimator
 
