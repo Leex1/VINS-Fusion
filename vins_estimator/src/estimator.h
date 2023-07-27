@@ -106,10 +106,10 @@ class Estimator
     double initial_timestamp;
 
 
-    double para_Pose[WINDOW_SIZE + 1][SIZE_POSE];
-    double para_SpeedBias[WINDOW_SIZE + 1][SIZE_SPEEDBIAS];
-    double para_Feature[NUM_OF_F][SIZE_FEATURE];
-    double para_Ex_Pose[NUM_OF_CAM][SIZE_POSE];
+    double para_Pose[WINDOW_SIZE + 1][SIZE_POSE];// 位置3+姿态4
+    double para_SpeedBias[WINDOW_SIZE + 1][SIZE_SPEEDBIAS];// 速度3+零偏w3和a3
+    double para_Feature[NUM_OF_F][SIZE_FEATURE];// 逆深度
+    double para_Ex_Pose[NUM_OF_CAM][SIZE_POSE];// 外参
     double para_Retrive_Pose[SIZE_POSE];
     double para_Td[1][1];
     double para_Tr[1][1];
