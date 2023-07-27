@@ -61,8 +61,10 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
         residual = pre_integration->evaluate(Pi, Qi, Vi, Bai, Bgi,
                                             Pj, Qj, Vj, Baj, Bgj);
 
+		// 不像G2O，可以直接设置信息矩阵，我们最后维护的都是带权重的误差，所以代码里用的是LLT分解的方式来搞到信息矩阵，得到信息矩阵开根号的结果作为置信度。
         Eigen::Matrix<double, 15, 15> sqrt_info = Eigen::LLT<Eigen::Matrix<double, 15, 15>>(pre_integration->covariance.inverse()).matrixL().transpose();
         //sqrt_info.setIdentity();
+        // 置信度直接乘在残差上。
         residual = sqrt_info * residual;
 
         if (jacobians)

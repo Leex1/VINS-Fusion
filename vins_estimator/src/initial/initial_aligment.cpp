@@ -19,16 +19,16 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);
         tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);
         tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
-        A += tmp_A.transpose() * tmp_A;
+        A += tmp_A.transpose() * tmp_A;// 直接小矩阵加起来，而不是垒起来。可能粗糙的看是可以的吧
         b += tmp_A.transpose() * tmp_b;
 
     }
-    delta_bg = A.ldlt().solve(b);
+    delta_bg = A.ldlt().solve(b);// 解得零偏
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
-
+    // 滑窗中的零偏设置为 求解出来的零偏
     for (int i = 0; i <= WINDOW_SIZE; i++)
         Bgs[i] += delta_bg;
-
+    // 对all_image_frame中预积分量根据当前零偏重新积分
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)
     {
         frame_j = next(frame_i);
@@ -44,21 +44,22 @@ MatrixXd TangentBasis(Vector3d &g0)
     Vector3d tmp(0, 0, 1);
     if(a == tmp)
         tmp << 1, 0, 0;
-    b = (tmp - a * (a.transpose() * tmp)).normalized();
-    c = a.cross(b);
+    b = (tmp - a * (a.transpose() * tmp)).normalized();// 在tmp和a的平面上得到垂直于a的向量
+    c = a.cross(b);// c同时垂直于a和b
     MatrixXd bc(3, 2);
     bc.block<3, 1>(0, 0) = b;
     bc.block<3, 1>(0, 1) = c;
     return bc;
 }
 
+// 得到了一个初始的重力向量，引入重力大小作为先验，再进行几次迭代的优化，求解最终的变量
 void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     Vector3d g0 = g.normalized() * G.norm();
     Vector3d lx, ly;
     //VectorXd x;
     int all_frame_count = all_image_frame.size();
-    int n_state = all_frame_count * 3 + 2 + 1;
+    int n_state = all_frame_count * 3 + 2 + 1;// 重力少了一个自由度
 
     MatrixXd A{n_state, n_state};
     A.setZero();
@@ -70,7 +71,7 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
     for(int k = 0; k < 4; k++)
     {
         MatrixXd lxly(3, 2);
-        lxly = TangentBasis(g0);
+        lxly = TangentBasis(g0);// 获得两个方向向量
         int i = 0;
         for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++)
         {
@@ -85,7 +86,7 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
 
 
             tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
-            tmp_A.block<3, 2>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity() * lxly;
+            tmp_A.block<3, 2>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity() * lxly;// 做了变化
             tmp_A.block<3, 1>(0, 8) = frame_i->second.R.transpose() * (frame_j->second.T - frame_i->second.T) / 100.0;     
             tmp_b.block<3, 1>(0, 0) = frame_j->second.pre_integration->delta_p + frame_i->second.R.transpose() * frame_j->second.R * TIC[0] - TIC[0] - frame_i->second.R.transpose() * dt * dt / 2 * g0;
 
@@ -116,18 +117,19 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
             b = b * 1000.0;
             x = A.ldlt().solve(b);
             VectorXd dg = x.segment<2>(n_state - 3);
-            g0 = (g0 + lxly * dg).normalized() * G.norm();
+            g0 = (g0 + lxly * dg).normalized() * G.norm();// 调整了g的方向
             //double s = x(n_state - 1);
     }   
     g = g0;
 }
 
+// 求解各帧的速度，枢纽帧的重力方向，以及尺度
 bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
-    int all_frame_count = all_image_frame.size();
-    int n_state = all_frame_count * 3 + 3 + 1;
+    int all_frame_count = all_image_frame.size();// 滑窗有n帧
+    int n_state = all_frame_count * 3 + 3 + 1;// 最后拼出来的大矩阵H
 
-    MatrixXd A{n_state, n_state};
+    MatrixXd A{n_state, n_state};// 伪逆的ATA
     A.setZero();
     VectorXd b{n_state};
     b.setZero();
@@ -145,7 +147,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         tmp_b.setZero();
 
         double dt = frame_j->second.pre_integration->sum_dt;
-
+        // 论文中的10式 11式
         tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
         tmp_A.block<3, 3>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity();
         tmp_A.block<3, 1>(0, 9) = frame_i->second.R.transpose() * (frame_j->second.T - frame_i->second.T) / 100.0;     
@@ -165,6 +167,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;
         VectorXd r_b = tmp_A.transpose() * cov_inv * tmp_b;
 
+        // 拼成一个大矩阵
         A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();
         b.segment<6>(i * 3) += r_b.head<6>();
 
@@ -174,18 +177,22 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         A.block<6, 4>(i * 3, n_state - 4) += r_A.topRightCorner<6, 4>();
         A.block<4, 6>(n_state - 4, i * 3) += r_A.bottomLeftCorner<4, 6>();
     }
+    // 为了数值稳定性，同乘1000
     A = A * 1000.0;
     b = b * 1000.0;
     x = A.ldlt().solve(b);
-    double s = x(n_state - 1) / 100.0;
+    // 取出尺度s
+    double s = x(n_state - 1) / 100.0;// 前面除了100，所以算出来自然乘了100，所以这里也除100
     ROS_DEBUG("estimated scale: %f", s);
     g = x.segment<3>(n_state - 4);
     ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());
+    // 做一些g的检查，重力大小，尺度为正
     if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)
     {
         return false;
     }
 
+    // 重力修复：基于已知重力的视觉惯性对齐调整
     RefineGravity(all_image_frame, g, x);
     s = (x.tail<1>())(0) / 100.0;
     (x.tail<1>())(0) = s;
@@ -198,7 +205,7 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
 
 bool VisualIMUAlignment(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs, Vector3d &g, VectorXd &x)
 {
-    solveGyroscopeBias(all_image_frame, Bgs);
+    solveGyroscopeBias(all_image_frame, Bgs);// 零偏估计
 
     if(LinearAlignment(all_image_frame, g, x))
         return true;

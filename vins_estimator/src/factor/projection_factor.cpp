@@ -21,6 +21,7 @@ ProjectionFactor::ProjectionFactor(const Eigen::Vector3d &_pts_i, const Eigen::V
 bool ProjectionFactor::Evaluate(double const *const *parameters, double *residuals, double **jacobians) const
 {
     TicToc tic_toc;
+    // 定义残差块
     Eigen::Vector3d Pi(parameters[0][0], parameters[0][1], parameters[0][2]);
     Eigen::Quaterniond Qi(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
 
@@ -32,10 +33,16 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
 
     double inv_dep_i = parameters[3][0];
 
+	// 计算中间变量,重投影的过程
+    // 地图点在i帧相机坐标系下坐标
     Eigen::Vector3d pts_camera_i = pts_i / inv_dep_i;
+    // 转成第i帧imu坐标系
     Eigen::Vector3d pts_imu_i = qic * pts_camera_i + tic;
+    // 转成世界坐标系
     Eigen::Vector3d pts_w = Qi * pts_imu_i + Pi;
+    // 转到第j帧imu坐标系
     Eigen::Vector3d pts_imu_j = Qj.inverse() * (pts_w - Pj);
+    // 转到第j帧相机坐标系
     Eigen::Vector3d pts_camera_j = qic.inverse() * (pts_imu_j - tic);
     Eigen::Map<Eigen::Vector2d> residual(residuals);
 
@@ -43,17 +50,17 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
     residual =  tangent_base * (pts_camera_j.normalized() - pts_j.normalized());
 #else
     double dep_j = pts_camera_j.z();
-    residual = (pts_camera_j / dep_j).head<2>() - pts_j.head<2>();
+    residual = (pts_camera_j / dep_j).head<2>() - pts_j.head<2>();// 残差
 #endif
 
-    residual = sqrt_info * residual;
+    residual = sqrt_info * residual;// 误差乘上信息矩阵，这里置信度钉死的是1.5个像素
 
     if (jacobians)
     {
         Eigen::Matrix3d Ri = Qi.toRotationMatrix();
         Eigen::Matrix3d Rj = Qj.toRotationMatrix();
         Eigen::Matrix3d ric = qic.toRotationMatrix();
-        Eigen::Matrix<double, 2, 3> reduce(2, 3);
+        Eigen::Matrix<double, 2, 3> reduce(2, 3);//链导的第一部分
 #ifdef UNIT_SPHERE_ERROR
         double norm = pts_camera_j.norm();
         Eigen::Matrix3d norm_jaco;
@@ -79,7 +86,7 @@ bool ProjectionFactor::Evaluate(double const *const *parameters, double *residua
             jaco_i.leftCols<3>() = ric.transpose() * Rj.transpose();
             jaco_i.rightCols<3>() = ric.transpose() * Rj.transpose() * Ri * -Utility::skewSymmetric(pts_imu_i);
 
-            jacobian_pose_i.leftCols<6>() = reduce * jaco_i;
+            jacobian_pose_i.leftCols<6>() = reduce * jaco_i;// 链式求导，乘上之前算的部分
             jacobian_pose_i.rightCols<1>().setZero();
         }
 

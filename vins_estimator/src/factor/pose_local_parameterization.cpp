@@ -7,7 +7,7 @@ bool PoseLocalParameterization::Plus(const double *x, const double *delta, doubl
 
     Eigen::Map<const Eigen::Vector3d> dp(delta);
 
-    Eigen::Quaterniond dq = Utility::deltaQ(Eigen::Map<const Eigen::Vector3d>(delta + 3));
+    Eigen::Quaterniond dq = Utility::deltaQ(Eigen::Map<const Eigen::Vector3d>(delta + 3));// 几个double变成一个quaternion，不过用的是小增量的形式
 
     Eigen::Map<Eigen::Vector3d> p(x_plus_delta);
     Eigen::Map<Eigen::Quaterniond> q(x_plus_delta + 3);

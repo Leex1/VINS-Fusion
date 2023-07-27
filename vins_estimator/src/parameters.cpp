@@ -51,10 +51,10 @@ void readParameters(ros::NodeHandle &n)
 
     fsSettings["imu_topic"] >> IMU_TOPIC;
 
-    SOLVER_TIME = fsSettings["max_solver_time"];
-    NUM_ITERATIONS = fsSettings["max_num_iterations"];
-    MIN_PARALLAX = fsSettings["keyframe_parallax"];
-    MIN_PARALLAX = MIN_PARALLAX / FOCAL_LENGTH;
+    SOLVER_TIME = fsSettings["max_solver_time"];// 单次优化最大求解时间
+    NUM_ITERATIONS = fsSettings["max_num_iterations"];// 单次优化最大迭代次数
+    MIN_PARALLAX = fsSettings["keyframe_parallax"];// 根据视差决定关键帧
+    MIN_PARALLAX = MIN_PARALLAX / FOCAL_LENGTH;// 虚拟焦距，方便适配不同相机
 
     std::string OUTPUT_PATH;
     fsSettings["output_path"] >> OUTPUT_PATH;
@@ -77,7 +77,7 @@ void readParameters(ros::NodeHandle &n)
     ROS_INFO("ROW: %f COL: %f ", ROW, COL);
 
     ESTIMATE_EXTRINSIC = fsSettings["estimate_extrinsic"];
-    if (ESTIMATE_EXTRINSIC == 2)
+    if (ESTIMATE_EXTRINSIC == 2)// 啥也不知道
     {
         ROS_WARN("have no prior about extrinsic param, calibrate extrinsic param");
         RIC.push_back(Eigen::Matrix3d::Identity());
@@ -87,12 +87,12 @@ void readParameters(ros::NodeHandle &n)
     }
     else 
     {
-        if ( ESTIMATE_EXTRINSIC == 1)
+        if ( ESTIMATE_EXTRINSIC == 1)// 知道点
         {
             ROS_WARN(" Optimize extrinsic param around initial guess!");
             EX_CALIB_RESULT_PATH = OUTPUT_PATH + "/extrinsic_parameter.csv";
         }
-        if (ESTIMATE_EXTRINSIC == 0)
+        if (ESTIMATE_EXTRINSIC == 0)// 贼准，不用优化了
             ROS_WARN(" fix extrinsic param ");
 
         cv::Mat cv_R, cv_T;
@@ -100,7 +100,7 @@ void readParameters(ros::NodeHandle &n)
         fsSettings["extrinsicTranslation"] >> cv_T;
         Eigen::Matrix3d eigen_R;
         Eigen::Vector3d eigen_T;
-        cv::cv2eigen(cv_R, eigen_R);
+        cv::cv2eigen(cv_R, eigen_R);// 转成eigen，方便用
         cv::cv2eigen(cv_T, eigen_T);
         Eigen::Quaterniond Q(eigen_R);
         eigen_R = Q.normalized();
@@ -111,10 +111,11 @@ void readParameters(ros::NodeHandle &n)
         
     } 
 
-    INIT_DEPTH = 5.0;
+    INIT_DEPTH = 5.0;// 特征点深度的默认值
     BIAS_ACC_THRESHOLD = 0.1;
     BIAS_GYR_THRESHOLD = 0.1;
 
+	// 传感器时延相关
     TD = fsSettings["td"];
     ESTIMATE_TD = fsSettings["estimate_td"];
     if (ESTIMATE_TD)

@@ -18,37 +18,42 @@ class IntegrationBase
           sum_dt{0.0}, delta_p{Eigen::Vector3d::Zero()}, delta_q{Eigen::Quaterniond::Identity()}, delta_v{Eigen::Vector3d::Zero()}
 
     {
-        noise = Eigen::Matrix<double, 18, 18>::Zero();
-        noise.block<3, 3>(0, 0) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();
-        noise.block<3, 3>(3, 3) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();
-        noise.block<3, 3>(6, 6) =  (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();
-        noise.block<3, 3>(9, 9) =  (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();
-        noise.block<3, 3>(12, 12) =  (ACC_W * ACC_W) * Eigen::Matrix3d::Identity();
-        noise.block<3, 3>(15, 15) =  (GYR_W * GYR_W) * Eigen::Matrix3d::Identity();
+      // 这里不明白为啥论文里面是3*4=12维的，但是这里还要加上k+1的accN和gyrN
+      // 实际上，这里的noise就是人为设定的传感器的噪声参数，这里就是可以不变。而搞出来k+1是因为我们离散推导的时候推出来了误差量和前后帧相关
+      noise = Eigen::Matrix<double, 18, 18>::Zero();       
+      noise.block<3, 3>(0, 0) = (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();
+      noise.block<3, 3>(3, 3) = (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();
+      noise.block<3, 3>(6, 6) = (ACC_N * ACC_N) * Eigen::Matrix3d::Identity();
+      noise.block<3, 3>(9, 9) = (GYR_N * GYR_N) * Eigen::Matrix3d::Identity();
+      noise.block<3, 3>(12, 12) = (ACC_W * ACC_W) * Eigen::Matrix3d::Identity();
+      noise.block<3, 3>(15, 15) = (GYR_W * GYR_W) * Eigen::Matrix3d::Identity();
     }
 
+    // 相关时间差和传感器数据保留在buf中，方便后续repropagate。 
     void push_back(double dt, const Eigen::Vector3d &acc, const Eigen::Vector3d &gyr)
     {
-        dt_buf.push_back(dt);
-        acc_buf.push_back(acc);
-        gyr_buf.push_back(gyr);
-        propagate(dt, acc, gyr);
+      dt_buf.push_back(dt);
+      acc_buf.push_back(acc);
+      gyr_buf.push_back(gyr);
+      propagate(dt, acc, gyr);// 进行propagate
     }
 
     void repropagate(const Eigen::Vector3d &_linearized_ba, const Eigen::Vector3d &_linearized_bg)
     {
+        // 状态量全部清零
         sum_dt = 0.0;
         acc_0 = linearized_acc;
         gyr_0 = linearized_gyr;
         delta_p.setZero();
         delta_q.setIdentity();
         delta_v.setZero();
+        // 赋上设置的零偏
         linearized_ba = _linearized_ba;
         linearized_bg = _linearized_bg;
         jacobian.setIdentity();
         covariance.setZero();
         for (int i = 0; i < static_cast<int>(dt_buf.size()); i++)
-            propagate(dt_buf[i], acc_buf[i], gyr_buf[i]);
+            propagate(dt_buf[i], acc_buf[i], gyr_buf[i]);// 利用存好的buf直接进行重推导
     }
 
     void midPointIntegration(double _dt, 
@@ -60,9 +65,11 @@ class IntegrationBase
                             Eigen::Vector3d &result_linearized_ba, Eigen::Vector3d &result_linearized_bg, bool update_jacobian)
     {
         //ROS_INFO("midpoint integration");
+        // 这里对应论文中27式，acc想要中值必须要在同一个坐标系
+        // 预计分离散化
         Vector3d un_acc_0 = delta_q * (_acc_0 - linearized_ba);
         Vector3d un_gyr = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;
-        result_delta_q = delta_q * Quaterniond(1, un_gyr(0) * _dt / 2, un_gyr(1) * _dt / 2, un_gyr(2) * _dt / 2);
+        result_delta_q = delta_q * Quaterniond(1, un_gyr(0) * _dt / 2, un_gyr(1) * _dt / 2, un_gyr(2) * _dt / 2);//四元数的小增量近似
         Vector3d un_acc_1 = result_delta_q * (_acc_1 - linearized_ba);
         Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
         result_delta_p = delta_p + delta_v * _dt + 0.5 * un_acc * _dt * _dt;
@@ -70,12 +77,13 @@ class IntegrationBase
         result_linearized_ba = linearized_ba;
         result_linearized_bg = linearized_bg;         
 
+		// 算出该步骤的F和V，以完成协方差和亚克比的更新
         if(update_jacobian)
         {
             Vector3d w_x = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;
             Vector3d a_0_x = _acc_0 - linearized_ba;
             Vector3d a_1_x = _acc_1 - linearized_ba;
-            Matrix3d R_w_x, R_a_0_x, R_a_1_x;
+            Matrix3d R_w_x, R_a_0_x, R_a_1_x;// 事先把F矩阵中反复出现的反对称矩阵算一下
 
             R_w_x<<0, -w_x(2), w_x(1),
                 w_x(2), 0, -w_x(0),
@@ -105,7 +113,7 @@ class IntegrationBase
             F.block<3, 3>(12, 12) = Matrix3d::Identity();
             //cout<<"A"<<endl<<A<<endl;
 
-            MatrixXd V = MatrixXd::Zero(15,18);
+            MatrixXd V = MatrixXd::Zero(15,18);// 这里是白噪声所以加上负号影响不大
             V.block<3, 3>(0, 0) =  0.25 * delta_q.toRotationMatrix() * _dt * _dt;
             V.block<3, 3>(0, 3) =  0.25 * -result_delta_q.toRotationMatrix() * R_a_1_x  * _dt * _dt * 0.5 * _dt;
             V.block<3, 3>(0, 6) =  0.25 * result_delta_q.toRotationMatrix() * _dt * _dt;
@@ -127,6 +135,7 @@ class IntegrationBase
 
     }
 
+    // 预计分，使用中值积分方法更新测量量，同时使用前向积分方法更新方差和亚克比矩阵。最后结果是两个i之间 三个result后缀的希腊字母
     void propagate(double _dt, const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1)
     {
         dt = _dt;
@@ -174,7 +183,7 @@ class IntegrationBase
         Eigen::Vector3d dbg = Bgi - linearized_bg;
 
         Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);
-        Eigen::Vector3d corrected_delta_v = delta_v + dv_dba * dba + dv_dbg * dbg;
+        Eigen::Vector3d corrected_delta_v = delta_v + dv_dba * dba + dv_dbg * dbg;// 这里用correct是因为用J修正了
         Eigen::Vector3d corrected_delta_p = delta_p + dp_dba * dba + dp_dbg * dbg;
 
         residuals.block<3, 1>(O_P, 0) = Qi.inverse() * (0.5 * G * sum_dt * sum_dt + Pj - Pi - Vi * sum_dt) - corrected_delta_p;
@@ -190,7 +199,7 @@ class IntegrationBase
     Eigen::Vector3d acc_1, gyr_1;
 
     const Eigen::Vector3d linearized_acc, linearized_gyr;
-    Eigen::Vector3d linearized_ba, linearized_bg;
+    Eigen::Vector3d linearized_ba, linearized_bg;// 零偏
 
     Eigen::Matrix<double, 15, 15> jacobian, covariance;
     Eigen::Matrix<double, 15, 15> step_jacobian;

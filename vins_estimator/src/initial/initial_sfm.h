@@ -15,10 +15,10 @@ using namespace std;
 
 struct SFMFeature
 {
-    bool state;
+    bool state;// pnp判断条件
     int id;
-    vector<pair<int,Vector2d>> observation;
-    double position[3];
+    vector<pair<int,Vector2d>> observation;// 起始帧 和 观测坐标
+    double position[3];// 存结果的
     double depth;
 };
 
@@ -28,6 +28,7 @@ struct ReprojectionError3D
 		:observed_u(observed_u), observed_v(observed_v)
 		{}
 
+	// 想要使用ceres自动求导，必须自定义运算符 写成模板函数的类型，告诉它怎么求残差（残差要放到最后一个参数）
 	template <typename T>
 	bool operator()(const T* const camera_R, const T* const camera_T, const T* point, T* residuals) const
 	{
@@ -36,6 +37,7 @@ struct ReprojectionError3D
 		p[0] += camera_T[0]; p[1] += camera_T[1]; p[2] += camera_T[2];
 		T xp = p[0] / p[2];
     	T yp = p[1] / p[2];
+		// 与现有观测形成残差
     	residuals[0] = xp - T(observed_u);
     	residuals[1] = yp - T(observed_v);
     	return true;
@@ -44,8 +46,9 @@ struct ReprojectionError3D
 	static ceres::CostFunction* Create(const double observed_x,
 	                                   const double observed_y) 
 	{
+		// 使用ceres自动求导
 	  return (new ceres::AutoDiffCostFunction<
-	          ReprojectionError3D, 2, 4, 3, 3>(
+	          ReprojectionError3D, 2, 4, 3, 3>(// 创造的类 残差的维度 其他各个参数的维度
 	          	new ReprojectionError3D(observed_x,observed_y)));
 	}
 
