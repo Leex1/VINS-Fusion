@@ -212,7 +212,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         else
             frame_count++;
     }
-    else
+    else    // solver_flag = NON_LINEAR,进行非线性优化
     {
         TicToc t_solve;
         solveOdometry();
@@ -937,52 +937,61 @@ void Estimator::optimization()
         if (last_marginalization_info)
         {
             vector<int> drop_set;
+            // last_marginalization_parameter_blocks是上一次边缘化对哪些当前参数块有约束
             for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++)
             {
+                // 涉及到的待边缘化的上一次边缘化留下来的当前参数块只有位姿和速度零偏
+                //查询last_marginalization_parameter_blocks中是首帧状态量的序号
                 if (last_marginalization_parameter_blocks[i] == para_Pose[0] ||
                     last_marginalization_parameter_blocks[i] == para_SpeedBias[0])
                     drop_set.push_back(i);
             }
+            // 处理方式和其他残差块相同，构造边缘化的新Factor
             // construct new marginlization_factor
             MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
             ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(marginalization_factor, NULL,
                                                                            last_marginalization_parameter_blocks,
-                                                                           drop_set);
+                                                                           drop_set);//添加上一次边缘化的参数块
 
             marginalization_info->addResidualBlockInfo(residual_block_info);
         }
+        // 上面这一段代码用dropset把最老帧的先验信息干掉了
 
+        // 然后把次要marg的视觉信息加进来
         {
-            if (pre_integrations[1]->sum_dt < 10.0)
+            // 只有第1个预计分和待边缘化参数块相连
+            if (pre_integrations[1]->sum_dt < 10.0)// 超过了10s的话置信率就不是很高，不如不要
             {
+                // 跟构建ceres问题一样，这里也需要得到残差和亚克比
                 IMUFactor* imu_factor = new IMUFactor(pre_integrations[1]);
                 ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(imu_factor, NULL,
                                                                            vector<double *>{para_Pose[0], para_SpeedBias[0], para_Pose[1], para_SpeedBias[1]},
-                                                                           vector<int>{0, 1});
-                marginalization_info->addResidualBlockInfo(residual_block_info);
+                                                                           vector<int>{0, 1});// 第0和1个参数块是需要被边缘化的【dropset】
+                marginalization_info->addResidualBlockInfo(residual_block_info);// 收集各个残差
             }
         }
-
+        // 遍历视觉重投影的约束
+        //添加视觉的先验，只添加起始帧是旧帧且观测次数大于2的Features
         {
             int feature_index = -1;
             for (auto &it_per_id : f_manager.feature)
             {
                 it_per_id.used_num = it_per_id.feature_per_frame.size();
                 if (!(it_per_id.used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
-                    continue;
+                    continue;//Feature的观测次数不小于2次，且起始帧不属于最后两帧
 
                 ++feature_index;
 
                 int imu_i = it_per_id.start_frame, imu_j = imu_i - 1;
-                if (imu_i != 0)
+                if (imu_i != 0)//只选择被边缘化的帧的Features。！所以下面的imu_i其实上都是0了
                     continue;
-
+                //得到该Feature在起始下的归一化坐标
                 Vector3d pts_i = it_per_id.feature_per_frame[0].point;
 
                 for (auto &it_per_frame : it_per_id.feature_per_frame)
                 {
                     imu_j++;
-                    if (imu_i == imu_j)
+                    if (imu_i == imu_j)//不需要起始观测帧
                         continue;
 
                     Vector3d pts_j = it_per_frame.point;
@@ -1001,7 +1010,7 @@ void Estimator::optimization()
                         ProjectionFactor *f = new ProjectionFactor(pts_i, pts_j);
                         ResidualBlockInfo *residual_block_info = new ResidualBlockInfo(f, loss_function,
                                                                                        vector<double *>{para_Pose[imu_i], para_Pose[imu_j], para_Ex_Pose[0], para_Feature[feature_index]},
-                                                                                       vector<int>{0, 3});
+                                                                                       vector<int>{0, 3});// drop_set这里是0和3，也就是上面的0帧Pose和0帧外参Ex_Pose
                         marginalization_info->addResidualBlockInfo(residual_block_info);
                     }
                 }
@@ -1013,30 +1022,34 @@ void Estimator::optimization()
         ROS_DEBUG("pre marginalization %f ms", t_pre_margin.toc());
         
         TicToc t_margin;
-        marginalization_info->marginalize();
+        marginalization_info->marginalize();// 进行边缘化，获得边缘化之后的H'  g' 即linearized_jacobians  linearized_residuals
         ROS_DEBUG("marginalization %f ms", t_margin.toc());
 
+        // 即将滑窗，因此记录新地址对应的老地址
         std::unordered_map<long, double *> addr_shift;
         for (int i = 1; i <= WINDOW_SIZE; i++)
         {
-            addr_shift[reinterpret_cast<long>(para_Pose[i])] = para_Pose[i - 1];
+            // 位姿和速度都要滑窗滑动
+            addr_shift[reinterpret_cast<long>(para_Pose[i])] = para_Pose[i - 1];// add_shift实际上是把老地址映射成新地址
             addr_shift[reinterpret_cast<long>(para_SpeedBias[i])] = para_SpeedBias[i - 1];
         }
+        // 外参和时间延时不变
         for (int i = 0; i < NUM_OF_CAM; i++)
             addr_shift[reinterpret_cast<long>(para_Ex_Pose[i])] = para_Ex_Pose[i];
         if (ESTIMATE_TD)
         {
             addr_shift[reinterpret_cast<long>(para_Td[0])] = para_Td[0];
         }
+        // parameter_blocks实际上就是addr_shift的索引的集合及搬进去的新地址
         vector<double *> parameter_blocks = marginalization_info->getParameterBlocks(addr_shift);
 
         if (last_marginalization_info)
             delete last_marginalization_info;
-        last_marginalization_info = marginalization_info;
-        last_marginalization_parameter_blocks = parameter_blocks;
+        last_marginalization_info = marginalization_info;// 本次边缘化的所有信息
+        last_marginalization_parameter_blocks = parameter_blocks;// 代表该次边缘化对某些参数块形成约束，这些参数在滑窗之后的地址【新】
         
     }
-    else
+    else    // 边缘化倒数第二帧
     {
         if (last_marginalization_info &&
             std::count(std::begin(last_marginalization_parameter_blocks), std::end(last_marginalization_parameter_blocks), para_Pose[WINDOW_SIZE - 1]))
@@ -1047,11 +1060,11 @@ void Estimator::optimization()
             if (last_marginalization_info)
             {
                 vector<int> drop_set;
-                for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++)
+                for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++)// 上一次边缘化还剩哪些块，对于每个块块遍历一下
                 {
                     ROS_ASSERT(last_marginalization_parameter_blocks[i] != para_SpeedBias[WINDOW_SIZE - 1]);
-                    if (last_marginalization_parameter_blocks[i] == para_Pose[WINDOW_SIZE - 1])
-                        drop_set.push_back(i);
+                    if (last_marginalization_parameter_blocks[i] == para_Pose[WINDOW_SIZE - 1])// 如果是倒数第二个位姿，那么就需要边缘化掉。其他的次新帧信息都可以丢掉不管
+                        drop_set.push_back(i);// 对于次新帧，我们只需要边缘化IMUPose数据
                 }
                 // construct new marginlization_factor
                 MarginalizationFactor *marginalization_factor = new MarginalizationFactor(last_marginalization_info);
@@ -1072,12 +1085,13 @@ void Estimator::optimization()
             marginalization_info->marginalize();
             ROS_DEBUG("end marginalization, %f ms", t_margin.toc());
             
+            // 即将滑窗，因此记录新地址对应的老地址
             std::unordered_map<long, double *> addr_shift;
             for (int i = 0; i <= WINDOW_SIZE; i++)
             {
-                if (i == WINDOW_SIZE - 1)
+                if (i == WINDOW_SIZE - 1)// 如果是次新帧，直接没了
                     continue;
-                else if (i == WINDOW_SIZE)
+                else if (i == WINDOW_SIZE)// 如果是新帧，变成次新帧
                 {
                     addr_shift[reinterpret_cast<long>(para_Pose[i])] = para_Pose[i - 1];
                     addr_shift[reinterpret_cast<long>(para_SpeedBias[i])] = para_SpeedBias[i - 1];

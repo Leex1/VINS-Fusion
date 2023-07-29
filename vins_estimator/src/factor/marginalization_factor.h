@@ -65,8 +65,8 @@ class MarginalizationInfo
     std::vector<int> keep_block_idx;  //local size
     std::vector<double *> keep_block_data;
 
-    Eigen::MatrixXd linearized_jacobians;
-    Eigen::VectorXd linearized_residuals;
+    Eigen::MatrixXd linearized_jacobians;// 边缘化之后的A阵
+    Eigen::VectorXd linearized_residuals;// 边缘化之后的b
     const double eps = 1e-8;
 
 };

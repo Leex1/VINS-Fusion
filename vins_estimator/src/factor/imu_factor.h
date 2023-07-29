@@ -57,7 +57,7 @@ class IMUFactor : public ceres::SizedCostFunction<15, 7, 9, 7, 9>
         }
 #endif
 
-        Eigen::Map<Eigen::Matrix<double, 15, 1>> residual(residuals);
+        Eigen::Map<Eigen::Matrix<double, 15, 1>> residual(residuals);// 指向double类型的数组residuals映射为一个大小为15x1的Eigen向量
         residual = pre_integration->evaluate(Pi, Qi, Vi, Bai, Bgi,
                                             Pj, Qj, Vj, Baj, Bgj);
 
