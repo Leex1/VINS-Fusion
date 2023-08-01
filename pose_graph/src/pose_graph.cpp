@@ -44,9 +44,10 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
     //shift to base frame
     Vector3d vio_P_cur;
     Matrix3d vio_R_cur;
-    if (sequence_cnt != cur_kf->sequence)
+    if (sequence_cnt != cur_kf->sequence)// 发生了sequence的跳变
     {
         sequence_cnt++;
+        // 复位一些变量
         sequence_loop.push_back(0);
         w_t_vio = Eigen::Vector3d(0, 0, 0);
         w_r_vio = Eigen::Matrix3d::Identity();
@@ -56,50 +57,59 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
         m_drift.unlock();
     }
     
-    cur_kf->getVioPose(vio_P_cur, vio_R_cur);
-    vio_P_cur = w_r_vio * vio_P_cur + w_t_vio;
+    // 更新一下vio的位姿
+    cur_kf->getVioPose(vio_P_cur, vio_R_cur);// 得到VIO节点的位姿
+    vio_P_cur = w_r_vio * vio_P_cur + w_t_vio;// 回环修正后的消除累计误差的位姿(如果发生了sequence的跳变)
     vio_R_cur = w_r_vio *  vio_R_cur;
-    cur_kf->updateVioPose(vio_P_cur, vio_R_cur);
-    cur_kf->index = global_index;
+    cur_kf->updateVioPose(vio_P_cur, vio_R_cur);// 更新VIO的位姿
+    cur_kf->index = global_index;// 赋值索引
     global_index++;
 	int loop_index = -1;
     if (flag_detect_loop)
     {
         TicToc tmp_t;
-        loop_index = detectLoop(cur_kf, cur_kf->index);
+        loop_index = detectLoop(cur_kf, cur_kf->index);// 回环检测
     }
     else
     {
         addKeyFrameIntoVoc(cur_kf);
     }
-	if (loop_index != -1)
+	if (loop_index != -1)// 找到了有效的回环
 	{
         //printf(" %d detect loop with %d \n", cur_kf->index, loop_index);
-        KeyFrame* old_kf = getKeyFrame(loop_index);
+        KeyFrame* old_kf = getKeyFrame(loop_index);// 得到回环帧的指针
 
-        if (cur_kf->findConnection(old_kf))
+        if (cur_kf->findConnection(old_kf)) // 如果确定两者回环（findConnection函数）
         {
+            // 更新最早回环帧，用来确定全局优化的范围
             if (earliest_loop_index > loop_index || earliest_loop_index == -1)
                 earliest_loop_index = loop_index;
 
             Vector3d w_P_old, w_P_cur, vio_P_cur;
             Matrix3d w_R_old, w_R_cur, vio_R_cur;
-            old_kf->getVioPose(w_P_old, w_R_old);
-            cur_kf->getVioPose(vio_P_cur, vio_R_cur);
+            old_kf->getVioPose(w_P_old, w_R_old);// 拿到T_w1_old
+            cur_kf->getVioPose(vio_P_cur, vio_R_cur);// T_w2_cur
 
             Vector3d relative_t;
             Quaterniond relative_q;
-            relative_t = cur_kf->getLoopRelativeT();
+            // T_old_cur
+            relative_t = cur_kf->getLoopRelativeT();// 获得回环和当前帧的相对位姿
             relative_q = (cur_kf->getLoopRelativeQ()).toRotationMatrix();
+            // T_w1_old * T_old_cur = T_w1_cur,利用回环矫正的当前帧，这就是回环校正后当前帧的位姿
             w_P_cur = w_R_old * relative_t + w_P_old;
             w_R_cur = w_R_old * relative_q;
+
             double shift_yaw;
             Matrix3d shift_r;
             Vector3d shift_t; 
+            // 回环校正前的位姿认为是T_w2_cur, 上面又求得了T_w1_cur
+            // 下面求得的是 T_w1_cur * T_cur_w2 = T_w1_w2
             shift_yaw = Utility::R2ypr(w_R_cur).x() - Utility::R2ypr(vio_R_cur).x();
-            shift_r = Utility::ypr2R(Vector3d(shift_yaw, 0, 0));
+            shift_r = Utility::ypr2R(Vector3d(shift_yaw, 0, 0));// 这两个shift开头的就是T_w1_w2
             shift_t = w_P_cur - w_R_cur * vio_R_cur.transpose() * vio_P_cur; 
             // shift vio pose of whole sequence to the world frame
+            // 如果这两个不是同一个sequence, 并且当前sequence没有跟之前合并
+            // TODO:什么sequence序列？看不懂
             if (old_kf->sequence != cur_kf->sequence && sequence_loop[cur_kf->sequence] == 0)
             {  
                 w_r_vio = shift_r;
@@ -123,17 +133,20 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
                 sequence_loop[cur_kf->sequence] = 1;
             }
             m_optimize_buf.lock();
-            optimize_buf.push(cur_kf->index);
+            optimize_buf.push(cur_kf->index);// 通知4dof优化序列开始干活
             m_optimize_buf.unlock();
         }
 	}
 	m_keyframelist.lock();
+
     Vector3d P;
     Matrix3d R;
     cur_kf->getVioPose(P, R);
-    P = r_drift * P + t_drift;
+    P = r_drift * P + t_drift;// 根据全局优化后进行位姿调整
     R = r_drift * R;
     cur_kf->updatePose(P, R);
+
+    // 下面是可视化的部分
     Quaterniond Q{R};
     geometry_msgs::PoseStamped pose_stamped;
     pose_stamped.header.stamp = ros::Time(cur_kf->time_stamp);
@@ -204,7 +217,7 @@ void PoseGraph::addKeyFrame(KeyFrame* cur_kf, bool flag_detect_loop)
     }
     //posegraph_visualization->add_pose(P + Vector3d(VISUALIZATION_SHIFT_X, VISUALIZATION_SHIFT_Y, 0), Q);
 
-	keyframelist.push_back(cur_kf);
+	keyframelist.push_back(cur_kf);// 当前帧送进KF容器中
     publish();
 	m_keyframelist.unlock();
 }
@@ -301,6 +314,7 @@ KeyFrame* PoseGraph::getKeyFrame(int index)
         return NULL;
 }
 
+// 进行回环检测，寻找候选的回环帧
 int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
 {
     // put image into image_pool; for visualization
@@ -316,11 +330,13 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
     //first query; then add this frame into database!
     QueryResults ret;
     TicToc t_query;
+    // 调用词袋查询接口，查询结果是ret，最多返回4个备选KF，查找距离当前至少50帧的KF
     db.query(keyframe->brief_descriptors, ret, 4, frame_index - 50);
     //printf("query time: %f", t_query.toc());
     //cout << "Searching for Image " << frame_index << ". " << ret << endl;
 
     TicToc t_add;
+    // 当然也会把当前帧送进数据库中，便于后续帧的查询
     db.add(keyframe->brief_descriptors);
     //printf("add feature time: %f", t_add.toc());
     // ret[0] is the nearest neighbour's score. threshold change with neighour score
@@ -345,13 +361,16 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         }
     }
     // a good match with its nerghbour
+    // ret按照得分大小降序排列，这里确保返回的候选KF数目至少一个，且得分满足要求
     if (ret.size() >= 1 &&ret[0].Score > 0.05)
+        // 开始遍历其他候选帧
         for (unsigned int i = 1; i < ret.size(); i++)
         {
             //if (ret[i].Score > ret[0].Score * 0.3)
+            // 如果有大于一个候选帧且得分满足要求
             if (ret[i].Score > 0.015)
             {          
-                find_loop = true;
+                find_loop = true;// 就认为找到回环了
                 int tmp_index = ret[i].Id;
                 if (DEBUG_IMAGE && 0)
                 {
@@ -370,18 +389,19 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         cv::waitKey(20);
     }
 */
-    if (find_loop && frame_index > 50)
+    if (find_loop && frame_index > 50)// 认为找到了回环 并且 当前帧是第50帧以后
     {
         int min_index = -1;
+        // 寻找得分大于0.015的idx最小的那个帧，这样可以尽可能的调整更多的位姿
         for (unsigned int i = 0; i < ret.size(); i++)
         {
             if (min_index == -1 || (ret[i].Id < min_index && ret[i].Score > 0.015))
                 min_index = ret[i].Id;
         }
-        return min_index;
+        return min_index;// 当前帧和min_index形成了回环，返回min_index
     }
     else
-        return -1;
+        return -1;// -1代表回环失败
 
 }
 
@@ -888,30 +908,33 @@ void PoseGraph::publish()
 
 void PoseGraph::updateKeyFrameLoop(int index, Eigen::Matrix<double, 8, 1 > &_loop_info)
 {
-    KeyFrame* kf = getKeyFrame(index);
-    kf->updateLoop(_loop_info);
+    KeyFrame* kf = getKeyFrame(index);// 当前帧(曾经的倒三帧）的索引
+    kf->updateLoop(_loop_info);// 更新和回环帧相对位姿信息
     if (abs(_loop_info(7)) < 30.0 && Vector3d(_loop_info(0), _loop_info(1), _loop_info(2)).norm() < 20.0)
     {
-        if (FAST_RELOCALIZATION)
+        if (FAST_RELOCALIZATION)// 肯定只有这种情况下触发
         {
-            KeyFrame* old_kf = getKeyFrame(kf->loop_index);
+            KeyFrame* old_kf = getKeyFrame(kf->loop_index);// 得到回环帧的信息
             Vector3d w_P_old, w_P_cur, vio_P_cur;
             Matrix3d w_R_old, w_R_cur, vio_R_cur;
-            old_kf->getPose(w_P_old, w_R_old);
-            kf->getVioPose(vio_P_cur, vio_R_cur);
+            old_kf->getPose(w_P_old, w_R_old);// w1系，回环帧的位姿T_w1_old
+            kf->getVioPose(vio_P_cur, vio_R_cur);// w2系,当前帧的vio的位姿T_w2_cur
 
             Vector3d relative_t;
             Quaterniond relative_q;
+            // 得到T_loop_cur
             relative_t = kf->getLoopRelativeT();
             relative_q = (kf->getLoopRelativeQ()).toRotationMatrix();
-            w_P_cur = w_R_old * relative_t + w_P_old;
-            w_R_cur = w_R_old * relative_q;
+            // T_w1_loop * T_loop_cur = T_w1_cur
+            w_P_cur = w_R_old * relative_t + w_P_old;// t_w1_cur
+            w_R_cur = w_R_old * relative_q;// R_w1_cur
             double shift_yaw;
             Matrix3d shift_r;
             Vector3d shift_t; 
-            shift_yaw = Utility::R2ypr(w_R_cur).x() - Utility::R2ypr(vio_R_cur).x();
+            // 更新VIO位姿和修正位姿的delta pose
+            shift_yaw = Utility::R2ypr(w_R_cur).x() - Utility::R2ypr(vio_R_cur).x();// R_w1_cur * R_cur_w2
             shift_r = Utility::ypr2R(Vector3d(shift_yaw, 0, 0));
-            shift_t = w_P_cur - w_R_cur * vio_R_cur.transpose() * vio_P_cur; 
+            shift_t = w_P_cur - w_R_cur * vio_R_cur.transpose() * vio_P_cur; // t_w1_cur - R_w1_cur * R_cur_w2 * t_w2_cur = t_w1_w2
 
             m_drift.lock();
             yaw_drift = shift_yaw;

@@ -129,11 +129,12 @@ class Estimator
     int relo_frame_local_index;
     vector<Vector3d> match_points;
     double relo_Pose[SIZE_POSE];
-    Matrix3d drift_correct_r;
+    // 下面这些量都是在检测出回环并完成非线性优化后更新的
+    Matrix3d drift_correct_r;//visualization.cpp的pubOdometry()函数使用,用于矫正滑窗内世界坐标系
     Vector3d drift_correct_t;
     Vector3d prev_relo_t;
     Matrix3d prev_relo_r;
-    Vector3d relo_relative_t;
+    Vector3d relo_relative_t;//visualization.cpp的pubRelocalization()函数使用，用于矫正滑窗内世界坐标系
     Quaterniond relo_relative_q;
     double relo_relative_yaw;
 };

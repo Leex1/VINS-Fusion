@@ -675,6 +675,8 @@ void Estimator::double2vector()
     { 
         Matrix3d relo_r;
         Vector3d relo_t;
+        // 对于检测出回环的帧的位姿也进行补偿
+        // TODO:为什么要补偿回环帧？
         relo_r = rot_diff * Quaterniond(relo_Pose[6], relo_Pose[3], relo_Pose[4], relo_Pose[5]).normalized().toRotationMatrix();
         relo_t = rot_diff * Vector3d(relo_Pose[0] - para_Pose[0][0],
                                      relo_Pose[1] - para_Pose[0][1],
@@ -682,14 +684,16 @@ void Estimator::double2vector()
         double drift_correct_yaw;
         drift_correct_yaw = Utility::R2ypr(prev_relo_r).x() - Utility::R2ypr(relo_r).x();
         drift_correct_r = Utility::ypr2R(Vector3d(drift_correct_yaw, 0, 0));
-        drift_correct_t = prev_relo_t - drift_correct_r * relo_t;   
+        drift_correct_t = prev_relo_t - drift_correct_r * relo_t;   //这个drift_correct_r和drift_correct_t在vins_estimator文件夹下visualization.cpp的pubOdometry()函数使用，用于矫正滑窗内世界坐标系，而pubOdometry()会被estimator_node.cpp的process()主线程中被调用
+
+        // T_loop_w * T_w_cur = T_loop_cur
         relo_relative_t = relo_r.transpose() * (Ps[relo_frame_local_index] - relo_t);
         relo_relative_q = relo_r.transpose() * Rs[relo_frame_local_index];
         relo_relative_yaw = Utility::normalizeAngle(Utility::R2ypr(Rs[relo_frame_local_index]).x() - Utility::R2ypr(relo_r).x());
         //cout << "vins relo " << endl;
         //cout << "vins relative_t " << relo_relative_t.transpose() << endl;
         //cout << "vins relative_yaw " <<relo_relative_yaw << endl;
-        relocalization_info = 0;    
+        relocalization_info = 0;    // 完成了快速重定位，算出了一个更好的deltaT
 
     }
 }
@@ -871,6 +875,7 @@ void Estimator::optimization()
         problem.AddParameterBlock(relo_Pose, SIZE_POSE, local_parameterization);
         int retrive_feature_index = 0;
         int feature_index = -1;
+        // 遍历现有的地图点
         for (auto &it_per_id : f_manager.feature)
         {
             it_per_id.used_num = it_per_id.feature_per_frame.size();
@@ -878,14 +883,17 @@ void Estimator::optimization()
                 continue;
             ++feature_index;
             int start = it_per_id.start_frame;
-            if(start <= relo_frame_local_index)
+            if(start <= relo_frame_local_index)// 这个地图点能被曾经的倒数第三帧对应的帧看到(特征点的起始帧不应早于曾经的倒数第三帧)
             {   
+                // 寻找回环帧能看到的地图点
                 while((int)match_points[retrive_feature_index].z() < it_per_id.feature_id)
                 {
                     retrive_feature_index++;
                 }
+                // 这个地图点能被回环帧看到
                 if((int)match_points[retrive_feature_index].z() == it_per_id.feature_id)
                 {
+                    // 则围绕这个地图点 构建一个重投影约束，这个地图点的起始帧和该回环帧之间的重投影误差
                     Vector3d pts_j = Vector3d(match_points[retrive_feature_index].x(), match_points[retrive_feature_index].y(), 1.0);
                     Vector3d pts_i = it_per_id.feature_per_frame[0].point;
                     
@@ -1259,22 +1267,24 @@ void Estimator::slideWindowOld()
         f_manager.removeBack();
 }
 
+// 接收回环帧的消息
 void Estimator::setReloFrame(double _frame_stamp, int _frame_index, vector<Vector3d> &_match_points, Vector3d _relo_t, Matrix3d _relo_r)
 {
-    relo_frame_stamp = _frame_stamp;
-    relo_frame_index = _frame_index;
+    relo_frame_stamp = _frame_stamp;////pose_graph里要被重定位的关键帧的时间戳
+    relo_frame_index = _frame_index;//回环帧在pose_graph里的id
     match_points.clear();
-    match_points = _match_points;
-    prev_relo_t = _relo_t;
-    prev_relo_r = _relo_r;
+    match_points = _match_points;//两帧共同的特征点在回环帧上的归一化坐标
+    prev_relo_t = _relo_t;//回环帧在自己世界坐标系的位姿(准)
+    prev_relo_r = _relo_r;//回环帧在自己世界坐标系的位姿(准)
+    // 在滑窗中寻找当前帧，因为VIO送给回环节点的是倒数第三帧，因此，很有可能这个当前帧还在滑窗里
     for(int i = 0; i < WINDOW_SIZE; i++)
     {
-        if(relo_frame_stamp == Headers[i].stamp.toSec())
+        if(relo_frame_stamp == Headers[i].stamp.toSec())//如果pose_graph里要被重定位的关键帧还在滑窗里
         {
-            relo_frame_local_index = i;
-            relocalization_info = 1;
+            relo_frame_local_index = i;// 找到了曾经的倒数第三帧现在对应滑窗中的第i帧，取出来
+            relocalization_info = 1;// 告诉后端，这是一个有效的回环信息，可以快速改一波直接优化
             for (int j = 0; j < SIZE_POSE; j++)
-                relo_Pose[j] = para_Pose[i][j];
+                relo_Pose[j] = para_Pose[i][j];// 借助VIO优化回环帧位姿，初值先设为当前帧位姿
         }
     }
 }

@@ -173,6 +173,7 @@ void pubOdometry(const Estimator &estimator, const std_msgs::Header &header)
     }
 }
 
+// 发布关键帧位姿
 void pubKeyPoses(const Estimator &estimator, const std_msgs::Header &header)
 {
     if (estimator.key_poses.size() == 0)
@@ -345,12 +346,13 @@ void pubTF(const Estimator &estimator, const std_msgs::Header &header)
 
 }
 
+// 发布关键帧
 void pubKeyframe(const Estimator &estimator)
 {
     // pub camera pose, 2D-3D points of keyframe
     if (estimator.solver_flag == Estimator::SolverFlag::NON_LINEAR && estimator.marginalization_flag == 0)
     {
-        int i = WINDOW_SIZE - 2;
+        int i = WINDOW_SIZE - 2;// TODO:倒数第？帧
         //Vector3d P = estimator.Ps[i] + estimator.Rs[i] * estimator.tic[0];
         Vector3d P = estimator.Ps[i];
         Quaterniond R = Quaterniond(estimator.Rs[i]);
@@ -375,21 +377,24 @@ void pubKeyframe(const Estimator &estimator)
         for (auto &it_per_id : estimator.f_manager.feature)
         {
             int frame_size = it_per_id.feature_per_frame.size();
+            // 能被 次二新帧看到且是有效的地图点
             if(it_per_id.start_frame < WINDOW_SIZE - 2 && it_per_id.start_frame + frame_size - 1 >= WINDOW_SIZE - 2 && it_per_id.solve_flag == 1)
             {
 
                 int imu_i = it_per_id.start_frame;
-                Vector3d pts_i = it_per_id.feature_per_frame[0].point * it_per_id.estimated_depth;
+                Vector3d pts_i = it_per_id.feature_per_frame[0].point * it_per_id.estimated_depth;// 相机坐标系下的坐标
+                // 转到世界坐标系
                 Vector3d w_pts_i = estimator.Rs[imu_i] * (estimator.ric[0] * pts_i + estimator.tic[0])
                                       + estimator.Ps[imu_i];
                 geometry_msgs::Point32 p;
                 p.x = w_pts_i(0);
                 p.y = w_pts_i(1);
                 p.z = w_pts_i(2);
-                point_cloud.points.push_back(p);
+                point_cloud.points.push_back(p);// 世界坐标系下的坐标 存入
 
                 int imu_j = WINDOW_SIZE - 2 - it_per_id.start_frame;
                 sensor_msgs::ChannelFloat32 p_2d;
+                // 在该帧坐标系下的归一化坐标 和 像素坐标  存入
                 p_2d.values.push_back(it_per_id.feature_per_frame[imu_j].point.x());
                 p_2d.values.push_back(it_per_id.feature_per_frame[imu_j].point.y());
                 p_2d.values.push_back(it_per_id.feature_per_frame[imu_j].uv.x());
@@ -399,15 +404,17 @@ void pubKeyframe(const Estimator &estimator)
             }
 
         }
-        pub_keyframe_point.publish(point_cloud);
+        pub_keyframe_point.publish(point_cloud);// 最后在回环检测中接收
     }
 }
 
+// 将优化后的回环帧和当前帧的相对位姿发布出去
 void pubRelocalization(const Estimator &estimator)
 {
     nav_msgs::Odometry odometry;
     odometry.header.stamp = ros::Time(estimator.relo_frame_stamp);
     odometry.header.frame_id = "world";
+    // 优化后的回环帧和当前帧的相对位姿
     odometry.pose.pose.position.x = estimator.relo_relative_t.x();
     odometry.pose.pose.position.y = estimator.relo_relative_t.y();
     odometry.pose.pose.position.z = estimator.relo_relative_t.z();
@@ -415,7 +422,9 @@ void pubRelocalization(const Estimator &estimator)
     odometry.pose.pose.orientation.y = estimator.relo_relative_q.y();
     odometry.pose.pose.orientation.z = estimator.relo_relative_q.z();
     odometry.pose.pose.orientation.w = estimator.relo_relative_q.w();
+    // 回环帧的相对yaw
     odometry.twist.twist.linear.x = estimator.relo_relative_yaw;
+    // 回环帧对应的当前帧在回环节点中的idx
     odometry.twist.twist.linear.y = estimator.relo_frame_index;
 
     pub_relo_relative_pose.publish(odometry);

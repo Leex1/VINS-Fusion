@@ -78,25 +78,25 @@ public:
 
 
 	double time_stamp; 
-	int index;
+	int index;// 每addKeyFrame一次就加1，这个就是一个索引，所有通过降采样的关键帧都在里面排序,方便检查滑窗
 	int local_index;
-	Eigen::Vector3d vio_T_w_i; 
-	Eigen::Matrix3d vio_R_w_i; 
+	Eigen::Vector3d vio_T_w_i; // VIO节点的位姿【from 时间同步3buf】
+	Eigen::Matrix3d vio_R_w_i; // 【from 时间同步3buf】
 	Eigen::Vector3d T_w_i;
 	Eigen::Matrix3d R_w_i;
 	Eigen::Vector3d origin_vio_T;		
 	Eigen::Matrix3d origin_vio_R;
-	cv::Mat image;
+	cv::Mat image;// 和关键帧匹配的原图【from 时间同步3buf】
 	cv::Mat thumbnail;
-	vector<cv::Point3f> point_3d; 
-	vector<cv::Point2f> point_2d_uv;
-	vector<cv::Point2f> point_2d_norm;
-	vector<double> point_id;
-	vector<cv::KeyPoint> keypoints;
+	vector<cv::Point3f> point_3d;// VIO世界坐标系下的地图点坐标【from 时间同步3buf】
+	vector<cv::Point2f> point_2d_uv;// 归一化相机坐标系的坐标 【from 时间同步3buf】
+	vector<cv::Point2f> point_2d_norm;// 像素坐标【from 时间同步3buf】
+	vector<double> point_id;// 地图点idx【from 时间同步3buf】
+	vector<cv::KeyPoint> keypoints;// 额外提的特征点的像素坐标系坐标
 	vector<cv::KeyPoint> keypoints_norm;
-	vector<cv::KeyPoint> window_keypoints;
-	vector<BRIEF::bitset> brief_descriptors;
-	vector<BRIEF::bitset> window_brief_descriptors;
+	vector<cv::KeyPoint> window_keypoints;// 已有的特征点的像素坐标系坐标
+	vector<BRIEF::bitset> brief_descriptors;// 额外提取的特征点的描述子
+	vector<BRIEF::bitset> window_brief_descriptors;// 已有特征点的描述子
 	bool has_fast_point;
 	int sequence;
 
