@@ -52,9 +52,9 @@ public:
 	void savePoseGraph();
 	void loadPoseGraph();
 	void publish();
-	Vector3d t_drift;
+	Vector3d t_drift;// 回环修正量
 	double yaw_drift;
-	Matrix3d r_drift;
+	Matrix3d r_drift;// 回环修正量
 	// world frame( base sequence or first sequence)<----> cur sequence frame  
 	Vector3d w_t_vio;
 	Matrix3d w_r_vio;
@@ -70,14 +70,14 @@ private:
 	std::mutex m_optimize_buf;
 	std::mutex m_path;
 	std::mutex m_drift;
-	std::thread t_optimization;
+	std::thread t_optimization;// 线程，用于4dof位姿图优化
 	std::queue<int> optimize_buf;
 
 	int global_index;
 	int sequence_cnt;
 	vector<bool> sequence_loop;
 	map<int, cv::Mat> image_pool;
-	int earliest_loop_index;
+	int earliest_loop_index;// 是回环帧中最早的那个回环（如果形成了多个闭环，那永远用最早的那个开始优化是最好的）
 	int base_sequence;
 
 	BriefDatabase db;
@@ -159,16 +159,19 @@ void RotationMatrixRotatePoint(const T R[9], const T t[3], T r_t[3])
 	r_t[2] = R[6] * t[0] + R[7] * t[1] + R[8] * t[2];
 };
 
+// 使用ceres自动求导，只需要重载()运算符，用来计算残差即可
 struct FourDOFError
 {
+	// 构造函数传入两帧之间的相对位姿
 	FourDOFError(double t_x, double t_y, double t_z, double relative_yaw, double pitch_i, double roll_i)
 				  :t_x(t_x), t_y(t_y), t_z(t_z), relative_yaw(relative_yaw), pitch_i(pitch_i), roll_i(roll_i){}
 
 	template <typename T>
+	// 用来约束i帧的平移和yaw以及j帧的平移和yaw
 	bool operator()(const T* const yaw_i, const T* ti, const T* yaw_j, const T* tj, T* residuals) const
 	{
 		T t_w_ij[3];
-		t_w_ij[0] = tj[0] - ti[0];
+		t_w_ij[0] = tj[0] - ti[0];// 世界系下的deltat_ij
 		t_w_ij[1] = tj[1] - ti[1];
 		t_w_ij[2] = tj[2] - ti[2];
 
@@ -177,11 +180,14 @@ struct FourDOFError
 		YawPitchRollToRotationMatrix(yaw_i[0], T(pitch_i), T(roll_i), w_R_i);
 		// rotation transpose
 		T i_R_w[9];
+		// R_w_i -> R_i_w
 		RotationMatrixTranspose(w_R_i, i_R_w);
 		// rotation matrix rotate point
 		T t_i_ij[3];
+		// R_i_w * (t_w_j - t_w_i) = t_i_ij世界坐标系下i->j的向量转到i系下
 		RotationMatrixRotatePoint(i_R_w, t_w_ij, t_i_ij);
 
+		// 得到位移和yaw角的残差：计算 - 观测
 		residuals[0] = (t_i_ij[0] - T(t_x));
 		residuals[1] = (t_i_ij[1] - T(t_y));
 		residuals[2] = (t_i_ij[2] - T(t_z));
@@ -231,7 +237,7 @@ struct FourDOFWeightError
 		residuals[0] = (t_i_ij[0] - T(t_x)) * T(weight);
 		residuals[1] = (t_i_ij[1] - T(t_y)) * T(weight);
 		residuals[2] = (t_i_ij[2] - T(t_z)) * T(weight);
-		residuals[3] = NormalizeAngle((yaw_j[0] - yaw_i[0] - T(relative_yaw))) * T(weight) / T(10.0);
+		residuals[3] = NormalizeAngle((yaw_j[0] - yaw_i[0] - T(relative_yaw))) * T(weight) / T(10.0);// 有回环帧时，这里的权重有区别
 
 		return true;
 	}

@@ -79,10 +79,10 @@ public:
 
 	double time_stamp; 
 	int index;// 每addKeyFrame一次就加1，这个就是一个索引，所有通过降采样的关键帧都在里面排序,方便检查滑窗
-	int local_index;
+	int local_index;// 在4dof优化问题中的索引，from最早的回环帧
 	Eigen::Vector3d vio_T_w_i; // VIO节点的位姿【from 时间同步3buf】
 	Eigen::Matrix3d vio_R_w_i; // 【from 时间同步3buf】
-	Eigen::Vector3d T_w_i;
+	Eigen::Vector3d T_w_i;// 在回环检测时是copy上面的vio_T_w_i，回环优化后是更新的位姿
 	Eigen::Matrix3d R_w_i;
 	Eigen::Vector3d origin_vio_T;		
 	Eigen::Matrix3d origin_vio_R;
@@ -102,6 +102,6 @@ public:
 
 	bool has_loop;
 	int loop_index;
-	Eigen::Matrix<double, 8, 1 > loop_info;
+	Eigen::Matrix<double, 8, 1 > loop_info;// 回环相对坐标转换T_loop_cur[xyz,Q,yaw]
 };
 

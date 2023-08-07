@@ -442,6 +442,7 @@ void process()
     }
 }
 
+// 接受相关键盘指令
 void command()
 {
     if (!LOOP_CLOSURE)
@@ -449,7 +450,7 @@ void command()
     while(1)
     {
         char c = getchar();
-        if (c == 's')
+        if (c == 's')// save the map
         {
             m_process.lock();
             posegraph.savePoseGraph();
@@ -458,7 +459,7 @@ void command()
             // printf("program shutting down...\n");
             // ros::shutdown();
         }
-        if (c == 'n')
+        if (c == 'n')// n就是新建一个sequence
             new_sequence();
 
         std::chrono::milliseconds dura(5);
@@ -525,7 +526,7 @@ int main(int argc, char **argv)
         fout.close();
         fsSettings.release();
 
-        if (LOAD_PREVIOUS_POSE_GRAPH)
+        if (LOAD_PREVIOUS_POSE_GRAPH)// 对于已有的地图进行加载
         {
             printf("load pose graph\n");
             m_process.lock();
