@@ -167,13 +167,13 @@ PinholeCamera::Parameters::readFromYamlFile(const std::string& filename)
     m_imageWidth = static_cast<int>(fs["image_width"]);
     m_imageHeight = static_cast<int>(fs["image_height"]);
 
-    cv::FileNode n = fs["distortion_parameters"];
+    cv::FileNode n = fs["distortion_parameters"];// 畸变参数
     m_k1 = static_cast<double>(n["k1"]);
     m_k2 = static_cast<double>(n["k2"]);
     m_p1 = static_cast<double>(n["p1"]);
     m_p2 = static_cast<double>(n["p2"]);
 
-    n = fs["projection_parameters"];
+    n = fs["projection_parameters"];// 内参矩阵
     m_fx = static_cast<double>(n["fx"]);
     m_fy = static_cast<double>(n["fy"]);
     m_cx = static_cast<double>(n["cx"]);
@@ -454,6 +454,7 @@ PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) cons
     //double lambda;
 
     // Lift points to normalised plane
+    // 投影到归一化相机坐标系
     mx_d = m_inv_K11 * p(0) + m_inv_K13;
     my_d = m_inv_K22 * p(1) + m_inv_K23;
 
@@ -489,7 +490,7 @@ PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) cons
         else
         {
             // Recursive distortion model
-            int n = 8;
+            int n = 8;// 迭代8次
             Eigen::Vector2d d_u;
             distortion(Eigen::Vector2d(mx_d, my_d), d_u);
             // Approximate value
@@ -498,8 +499,8 @@ PinholeCamera::liftProjective(const Eigen::Vector2d& p, Eigen::Vector3d& P) cons
 
             for (int i = 1; i < n; ++i)
             {
-                distortion(Eigen::Vector2d(mx_u, my_u), d_u);
-                mx_u = mx_d - d_u(0);
+                distortion(Eigen::Vector2d(mx_u, my_u), d_u);// 用相机模型中的畸变系数，用畸变公式算出了delta x 和 delta y
+                mx_u = mx_d - d_u(0);// 将delta作用到原先的点上面去
                 my_u = my_d - d_u(1);
             }
         }

@@ -42,8 +42,8 @@ T readParam(ros::NodeHandle &n, std::string name)
 void readParameters(ros::NodeHandle &n)
 {
     std::string config_file;
-    config_file = readParam<std::string>(n, "config_file");
-    cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
+    config_file = readParam<std::string>(n, "config_file");// 在launch文件中完成了指定 配置文件的路径
+    cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);// 使用opencv的yaml文件接口来读取文件
     if(!fsSettings.isOpened())
     {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;

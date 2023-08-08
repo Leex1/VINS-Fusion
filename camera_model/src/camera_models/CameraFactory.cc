@@ -116,7 +116,7 @@ CameraFactory::generateCameraFromYamlFile(const std::string& filename)
         }
         else if (boost::iequals(sModelType, "pinhole"))
         {
-            modelType = Camera::PINHOLE;
+            modelType = Camera::PINHOLE;// 针孔相机
         }
         else
         {
@@ -138,11 +138,11 @@ CameraFactory::generateCameraFromYamlFile(const std::string& filename)
     }
     case Camera::PINHOLE:
     {
-        PinholeCameraPtr camera(new PinholeCamera);
+        PinholeCameraPtr camera(new PinholeCamera);// new一个针孔模型对象
 
-        PinholeCamera::Parameters params = camera->getParameters();
+        PinholeCamera::Parameters params = camera->getParameters();// 返回了一个引用
         params.readFromYamlFile(filename);
-        camera->setParameters(params);
+        camera->setParameters(params);// 读完了之后赋值给对象
         return camera;
     }
     case Camera::SCARAMUZZA:
